@@ -27,7 +27,7 @@ public:
 	void draw(bool drawLabels = false) const;
 	void reset();
 	
-	int size() const;
+	virtual int size() const;
 	bool getFound() const;
 	int getAge() const;
 	virtual bool getVisibility(int i) const;

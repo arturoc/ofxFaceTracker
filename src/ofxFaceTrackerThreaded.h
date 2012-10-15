@@ -4,36 +4,39 @@
 #include "ofxCv.h"
 #include "ofxFaceTracker.h"
 
-class ofxFaceTrackerThreaded : public ofxFaceTracker, public ofThread {
+class ofxFaceTrackerThreaded : public ofThread, public ofxFaceTracker {
 public:
 	ofxFaceTrackerThreaded()
-	:needsUpdatingBack(false)
-	,needsUpdatingFront(false)
-	,meanObjectPointsReady(false) {
+	:threadedIfFound(false)
+	,failedMiddle(true)
+	,meanObjectPointsReady(false)
+	,newFrameAnalized(false)
+	,scale(1)
+	{
 	}
 	~ofxFaceTrackerThreaded() {
-		stopThread(false);
-		ofSleepMillis(500);
+		newFrameCondition.signal();
+		waitForThread(true);
 	}
 	void setup() {
 		failed = true;
-		ofxFaceTracker::setup();
-		startThread(true, false);
+		tracker.setup();
+		startThread();
 	}
 	bool update(cv::Mat image) {
-		dataMutex.lock();
-		image.copyTo(imageMiddle);
-		objectPointsFront = objectPointsMiddle;
-		imagePointsFront = imagePointsMiddle;
-		meanObjectPointsFront = meanObjectPointsMiddle;
-		objectPointsMatFront = objectPointsMatMiddle;
-		failed = failedMiddle;
-		needsUpdatingFront = true;
-		dataMutex.unlock();
-		if(!failed) {
-			meanObjectPointsReady = true;
+		if((failed || threadedIfFound) && dataMutex.tryLock()){
+			image.copyTo(imageMiddle);
+			newFrameCondition.signal();
+			updateData();
+			dataMutex.unlock();
+		}else if(!failed){
+			dataMutex.lock();
+			image.copyTo(imageMiddle);
+			analyzeData();
+			updateData();
+			dataMutex.unlock();
 		}
-		return getFound();
+		return !failed;
 	}
 	const cv::Mat& getObjectPointsMat() const {
 		return objectPointsMatFront;
@@ -69,58 +72,71 @@ public:
 	float getScale() const {
 		return scale;
 	}
-	
-protected:
-	void threadedFunction() {
-		ofxFaceTracker* threadedTracker = new ofxFaceTracker();
-		threadedTracker->setup();
-		while(isThreadRunning()) {
-			dataMutex.lock();
-			needsUpdatingBack = needsUpdatingFront;
-			if(needsUpdatingBack) {
-				imageMiddle.copyTo(imageBack);
-			}
-			dataMutex.unlock();
-			
-			threadedTracker->setRescale(rescale);
-			threadedTracker->setIterations(iterations);
-			threadedTracker->setClamp(clamp);
-			threadedTracker->setTolerance(tolerance);
-			threadedTracker->setAttempts(attempts);
-			threadedTracker->setUseInvisible(useInvisible);
-			
-			if(needsUpdatingBack) {
-				threadedTracker->update(imageBack);
-			} else {
-				ofSleepMillis(4);
-			}
-			
-			dataMutex.lock();
-			objectPointsMiddle = threadedTracker->getObjectPoints();
-			imagePointsMiddle = threadedTracker->getImagePoints();
-			meanObjectPointsMiddle = threadedTracker->getMeanObjectPoints();
-			failedMiddle = !threadedTracker->getFound();
-			position = threadedTracker->getPosition();
-			orientation = threadedTracker->getOrientation();
-			scale = threadedTracker->getScale();
-			objectPointsMatMiddle = threadedTracker->getObjectPointsMat();
-			dataMutex.unlock();
-		}
-		delete threadedTracker;
+	int size() const{
+		return objectPointsFront.size();
 	}
 	
+	ofxFaceTracker tracker;
+	bool threadedIfFound;
+
+protected:
+	void threadedFunction() {
+		dataMutex.lock();
+		while(isThreadRunning()) {
+			newFrameCondition.wait(dataMutex);
+			analyzeData();
+			swap(imageMiddle,imageBack);
+		}
+	}
+	void analyzeData(){
+		swap(imageMiddle,imageBack);
+
+		tracker.setRescale(rescale);
+		tracker.setIterations(iterations);
+		tracker.setClamp(clamp);
+		tracker.setTolerance(tolerance);
+		tracker.setAttempts(attempts);
+		tracker.setUseInvisible(useInvisible);
+
+		tracker.update(imageBack);
+
+		objectPointsMiddle = tracker.getObjectPoints();
+		imagePointsMiddle = tracker.getImagePoints();
+		meanObjectPointsMiddle = tracker.getMeanObjectPoints();
+		failedMiddle = !tracker.getFound();
+		position = tracker.getPosition();
+		orientation = tracker.getOrientation();
+		scale = tracker.getScale();
+		objectPointsMatMiddle = tracker.getObjectPointsMat();
+		newFrameAnalized = true;
+	}
+	void updateData(){
+		if(newFrameAnalized){
+			swap(objectPointsFront,objectPointsMiddle);
+			swap(imagePointsFront,imagePointsMiddle);
+			swap(meanObjectPointsFront,meanObjectPointsMiddle);
+			swap(objectPointsMatFront,objectPointsMatMiddle);
+			failed = failedMiddle;
+			if(!failed) {
+				meanObjectPointsReady = true;
+			}
+		}
+		newFrameAnalized = false;
+	}
+
 	ofMutex dataMutex;
 	
-	bool needsUpdatingBack, needsUpdatingFront;
 	cv::Mat imageMiddle, imageBack;
 	vector<ofVec3f> objectPointsFront, objectPointsMiddle;
 	vector<ofVec2f> imagePointsFront, imagePointsMiddle;
 	vector<ofVec3f> meanObjectPointsFront, meanObjectPointsMiddle;
 	bool failedMiddle;
 	bool meanObjectPointsReady;
+	bool newFrameAnalized;
 	
 	ofVec3f orientation;
 	float scale;
 	ofVec2f position;
 	cv::Mat objectPointsMatBack, objectPointsMatMiddle, objectPointsMatFront; 
+	Poco::Condition newFrameCondition,frameAnalized;
 };
