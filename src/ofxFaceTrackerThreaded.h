@@ -12,6 +12,8 @@ public:
 	,meanObjectPointsReady(false)
 	,newFrameAnalized(false)
 	,scale(1)
+	,lastFrameFailed(0)
+	,frame(0)
 	{
 	}
 	~ofxFaceTrackerThreaded() {
@@ -21,15 +23,19 @@ public:
 	void setup() {
 		failed = true;
 		tracker.setup();
+		lastFrameFailed=0;
+		frame=0;
 		startThread();
 	}
 	bool update(cv::Mat image) {
+		frame++;
 		if((failed || threadedIfFound) && dataMutex.tryLock()){
 			image.copyTo(imageMiddle);
 			newFrameCondition.signal();
 			updateData();
 			dataMutex.unlock();
-		}else if(!failed){
+			lastFrameFailed = frame;
+		}else if(!failed && frame-lastFrameFailed>4){
 			dataMutex.lock();
 			image.copyTo(imageMiddle);
 			analyzeData();
@@ -75,9 +81,24 @@ public:
 	int size() const{
 		return objectPointsFront.size();
 	}
+
+	ofMesh getImageMesh() const{
+		return tracker.getMesh(getImagePoints());
+	}
+
+	ofMesh getObjectMesh() const{
+		return tracker.getMesh(getObjectPoints());
+	}
+
+	ofMesh getMeanObjectMesh() const{
+		return tracker.getMesh(getMeanObjectPoints());
+	}
 	
+	void setThreadedIfFound(bool _threadedIfFound){
+		threadedIfFound = _threadedIfFound;
+	}
+
 	ofxFaceTracker tracker;
-	bool threadedIfFound;
 
 protected:
 	void threadedFunction() {
@@ -124,6 +145,7 @@ protected:
 		newFrameAnalized = false;
 	}
 
+	bool threadedIfFound;
 	ofMutex dataMutex;
 	
 	cv::Mat imageMiddle, imageBack;
@@ -139,4 +161,5 @@ protected:
 	ofVec2f position;
 	cv::Mat objectPointsMatBack, objectPointsMatMiddle, objectPointsMatFront; 
 	Poco::Condition newFrameCondition,frameAnalized;
+	int lastFrameFailed, frame;
 };

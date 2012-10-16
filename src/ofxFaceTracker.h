@@ -40,9 +40,9 @@ public:
 	virtual ofVec3f getObjectPoint(int i) const;
 	virtual ofVec3f getMeanObjectPoint(int i) const;
 	
-	ofMesh getImageMesh() const;
-	ofMesh getObjectMesh() const;
-	ofMesh getMeanObjectMesh() const;
+	virtual ofMesh getImageMesh() const;
+	virtual ofMesh getObjectMesh() const;
+	virtual ofMesh getMeanObjectMesh() const;
 	template <class T> ofMesh getMesh(vector<T> points) const;
 	
 	virtual const cv::Mat& getObjectPointsMat() const;
